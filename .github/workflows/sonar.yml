@@ -124,10 +124,13 @@ jobs:
               ("Coverage", "coverage")
           ]:
               value = m.get(key, "N/A")
-              if key == "duplicated_lines_density":
-                  value = f"{value}%"
-              elif key == "coverage":
-                  value = f"{float(value):.1f}%"
+              try:
+                if key == "duplicated_lines_density":
+                    value = f"{float(value):.1f}%"
+                elif key == "coverage":
+                    value = f"{float(value):.1f}%"
+              except (ValueError, TypeError):
+                pass
               c.drawString(85, y, f"{label}: {value}")
               y -= 14
           y -= 10
