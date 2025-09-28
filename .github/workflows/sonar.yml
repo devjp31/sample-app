@@ -1,19 +1,25 @@
-name: SonarCloud Scan
+name: SonarCloud CI & Security Report
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
   pull_request:
     types: [opened, synchronize, reopened]
 
 jobs:
   sonarcloud:
+    name: SonarCloud Scan and Generate Report
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # ต้องมี เพื่อให้ SonarCloud วิเคราะห์โค้ดได้ครบ
 
+    steps:
+      # 1. ดึงโค้ดจาก GitHub
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # ต้องเป็น 0 เพื่อให้ SonarCloud อ่าน commit history ได้ถูกต้อง
+
+      # 2. รันการสแกนด้วย SonarCloud
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
         env:
@@ -24,3 +30,64 @@ jobs:
             -Dsonar.organization=nittayajp31-create
             -Dsonar.projectKey=devjp31_sample-app
             -Dsonar.host.url=https://sonarcloud.io
+
+      # 3. ตรวจสอบสถานะ Quality Gate จาก SonarCloud API
+      - name: Check Quality Gate status
+        id: qualitygate
+        run: |
+          echo "Checking SonarCloud Quality Gate status..."
+          response=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            "https://sonarcloud.io/api/qualitygates/project_status?projectKey=YOUR_PROJECT_KEY")
+
+          echo "Response: $response"
+          status=$(echo $response | jq -r '.projectStatus.status')
+
+          echo "Quality Gate Status: $status"
+          echo "status=$status" >> $GITHUB_OUTPUT
+
+      # 4. สร้างรายงาน PDF เมื่อผลสแกน “ผ่าน”
+      - name: Generate PDF Report
+        if: steps.qualitygate.outputs.status == 'OK'
+        run: |
+          echo "Generating SonarCloud PDF Report..."
+          pip install reportlab requests
+          python <<EOF
+          import requests
+          from reportlab.lib.pagesizes import A4
+          from reportlab.pdfgen import canvas
+
+          url = "https://sonarcloud.io/api/qualitygates/project_status?projectKey=YOUR_PROJECT_KEY"
+          r = requests.get(url, auth=("${{ secrets.SONAR_TOKEN }}", ""))
+          data = r.json()["projectStatus"]
+
+          c = canvas.Canvas("Sonar_Report.pdf", pagesize=A4)
+          c.setFont("Helvetica-Bold", 18)
+          c.drawString(100, 800, "SonarCloud Scan Report")
+          c.setFont("Helvetica", 12)
+          c.drawString(100, 770, "Project: YOUR_PROJECT_KEY")
+          c.drawString(100, 750, f"Quality Gate: {data['status']}")
+
+          y = 720
+          for cond in data["conditions"]:
+              c.drawString(100, y, f"{cond['metricKey']}: {cond['status']} (value={cond.get('value', 'N/A')})")
+              y -= 20
+
+          c.setFont("Helvetica-Oblique", 10)
+          c.drawString(100, y-20, "Generated automatically by GitHub Actions and SonarCloud.")
+          c.save()
+          EOF
+
+      # 5. อัปโหลด PDF เป็น Artifact (ให้ทีม Security ดาวน์โหลดได้)
+      - name: Upload PDF Report
+        if: steps.qualitygate.outputs.status == 'OK'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonarcloud-report
+          path: Sonar_Report.pdf
+
+      # 6. แจ้งเตือนเมื่อไม่ผ่าน
+      - name: Fail if Quality Gate failed
+        if: steps.qualitygate.outputs.status != 'OK'
+        run: |
+          echo "SonarCloud Quality Gate failed. Please review the issues in SonarCloud dashboard."
+          exit 1
