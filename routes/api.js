@@ -45,11 +45,11 @@ router.get('/debug', (req, res) => {
 //   res.send(`<h1>Welcome ${name}</h1>`);
 // });
 
-// GET /api/secret
-// router.get('/secret', (req, res) => {
-//   const password = 'password123'; 
-//   res.json({ secret: password });
-// });
+GET /api/secret
+router.get('/secret', (req, res) => {
+  const password = 'password123'; 
+  res.json({ secret: password });
+});
 
 const fs = require('fs');
 app.get('/readfile', (req, res) => {
