@@ -46,9 +46,19 @@ router.get('/debug', (req, res) => {
 // });
 
 // GET /api/secret
-router.get('/secret', (req, res) => {
-  const password = 'password123'; 
-  res.json({ secret: password });
+// router.get('/secret', (req, res) => {
+//   const password = 'password123'; 
+//   res.json({ secret: password });
+// });
+
+const fs = require('fs');
+app.get('/readfile', (req, res) => {
+  const filename = req.query.file;
+  // ช่องโหว่ Path Traversal เช่น /etc/passwd
+  fs.readFile(`./uploads/${filename}`, 'utf8', (err, data) => {
+    if (err) return res.status(500).send('Error reading file');
+    res.send(data);
+  });
 });
 
 module.exports = router;
