@@ -17,7 +17,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # ต้องเป็น 0 เพื่อให้ SonarCloud อ่าน commit history ได้ถูกต้อง
+          fetch-depth: 0
 
       # 2. รันการสแกนด้วย SonarCloud
       - name: SonarCloud Scan
@@ -31,19 +31,22 @@ jobs:
             -Dsonar.projectKey=devjp31_sample-app
             -Dsonar.host.url=https://sonarcloud.io
 
+      # (เพิ่มขั้นตอนรอ SonarCloud ประมวลผล)
+      - name: Wait for SonarCloud processing
+        run: |
+          echo "Waiting 60 seconds for SonarCloud to finalize analysis..."
+          sleep 60
+
       # 3. ตรวจสอบสถานะ Quality Gate จาก SonarCloud API
       - name: Check Quality Gate status
         id: qualitygate
         run: |
           echo "Checking SonarCloud Quality Gate status..."
           response=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "https://sonarcloud.io/api/qualitygates/project_status?projectKey=YOUR_PROJECT_KEY")
-
+            "https://sonarcloud.io/api/qualitygates/project_status?projectKey=devjp31_sample-app")
           echo "Response: $response"
           status=$(echo $response | jq -r '.projectStatus.status')
-
           echo "Quality Gate Status: $status"
-          echo "status=$status" >> $GITHUB_OUTPUT
 
       # 4. สร้างรายงาน PDF เมื่อผลสแกน “ผ่าน”
       - name: Generate PDF Report
@@ -56,7 +59,7 @@ jobs:
           from reportlab.lib.pagesizes import A4
           from reportlab.pdfgen import canvas
 
-          url = "https://sonarcloud.io/api/qualitygates/project_status?projectKey=YOUR_PROJECT_KEY"
+          url = "https://sonarcloud.io/api/qualitygates/project_status?projectKey=devjp31_sample-app"
           r = requests.get(url, auth=("${{ secrets.SONAR_TOKEN }}", ""))
           data = r.json()["projectStatus"]
 
@@ -64,7 +67,7 @@ jobs:
           c.setFont("Helvetica-Bold", 18)
           c.drawString(100, 800, "SonarCloud Scan Report")
           c.setFont("Helvetica", 12)
-          c.drawString(100, 770, "Project: YOUR_PROJECT_KEY")
+          c.drawString(100, 770, "Project: devjp31_sample-app")
           c.drawString(100, 750, f"Quality Gate: {data['status']}")
 
           y = 720
@@ -85,9 +88,14 @@ jobs:
           name: sonarcloud-report
           path: Sonar_Report.pdf
 
-      # 6. แจ้งเตือนเมื่อไม่ผ่าน
-      - name: Fail if Quality Gate failed
-        if: steps.qualitygate.outputs.status != 'OK'
+      # 6. ตรวจสอบสถานะจริงจาก API อีกครั้งเพื่อยืนยัน
+      - name: Validate SonarCloud status directly
         run: |
-          echo "SonarCloud Quality Gate failed. Please review the issues in SonarCloud dashboard."
-          exit 1
+          echo "Validating Quality Gate directly from SonarCloud API..."
+          status=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            "https://sonarcloud.io/api/qualitygates/project_status?projectKey=devjp31_sample-app" | jq -r '.projectStatus.status')
+          echo "SonarCloud Quality Gate status: $status"
+          if [ "$status" != "OK" ]; then
+            echo "SonarCloud Quality Gate failed. Please review the issues in SonarCloud dashboard."
+            exit 1
+          fi
