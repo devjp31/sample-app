@@ -99,10 +99,9 @@ jobs:
 
           # === โลโก้ SonarCloud ===
           try:
-              logo_url = "https://sonarcloud.io/images/sonarcloud-logo.svg"
-              png_logo_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/99/SonarCloud_logo.svg/512px-SonarCloud_logo.svg.png"
+              png_logo_url = "https://upload.wikimedia.org/wikipedia/commons/3/33/SonarQube_Logo.png"
               logo_img = ImageReader(io.BytesIO(requests.get(png_logo_url).content))
-              c.drawImage(logo_img, 70, y - 25, width=120, height=25, mask='auto')
+              c.drawImage(logo_img, 70, y - 25, width=100, height=25, mask='auto')
           except Exception as e:
               print(f"Logo load failed: {e}")
 
@@ -200,7 +199,7 @@ jobs:
               # === Fetch rule detail ===
               rule_desc = "(No solution provided)"
               try:
-                  rule_api = f"{HOST}/api/rules/show?key={rule}&actives=true"
+                  rule_api = f"{HOST}/api/rules/show?key={rule}&organization=nittayajp31-create&actives=true"
                   rule_data = requests.get(rule_api, auth=(TOKEN, "")).json()
                   html_desc = rule_data.get("rule", {}).get("htmlDesc", "")
                   description = rule_data.get("rule", {}).get("description", "")
