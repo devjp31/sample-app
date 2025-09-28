@@ -25,16 +25,16 @@ router.delete('/item/:id', (req, res) => {
 
 // GET /api/xss?name=<script>alert('xss')</script>
 // ช่องโหว่ XSS
-router.get('/xss', (req, res) => {
-  const name = req.query.name;
-  res.send(`<h1>Welcome ${name}</h1>`);
-});
+// router.get('/xss', (req, res) => {
+//   const name = req.query.name;
+//   res.send(`<h1>Welcome ${name}</h1>`);
+// });
 
 // GET /api/secret
 // ช่องโหว่ Hardcoded credential
-router.get('/secret', (req, res) => {
-  const password = 'password123'; // Hardcoded password (จะถูก SonarQube flag)
-  res.json({ secret: password });
-});
+// router.get('/secret', (req, res) => {
+//   const password = 'password123'; // Hardcoded password (จะถูก SonarQube flag)
+//   res.json({ secret: password });
+// });
 
 module.exports = router;
