@@ -15,7 +15,7 @@ jobs:
           fetch-depth: 0  # ต้องมี เพื่อให้ SonarCloud วิเคราะห์โค้ดได้ครบ
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
