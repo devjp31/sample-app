@@ -66,7 +66,7 @@ jobs:
           TOKEN = "${{ secrets.SONAR_TOKEN }}"
           PROJECT_KEY = "devjp31_sample-app"
           HOST = "https://sonarcloud.io"
-          output_path = os.path.join(os.getenv("GITHUB_WORKSPACE", "."), "Sonar_Report.pdf")
+          output_path = "Sonar_Report.pdf"
 
           # === เวลาไทย (Bangkok) ===
           bangkok_tz = pytz.timezone("Asia/Bangkok")
@@ -159,11 +159,11 @@ jobs:
 
       # 5. อัปโหลด PDF เป็น Artifact
       - name: Upload PDF Report
-        if: env.status == 'OK'
         uses: actions/upload-artifact@v4
         with:
           name: sonarcloud-report
-          path: ${{ github.workspace }}/Sonar_Report.pdf
+          path: Sonar_Report.pdf
+          if-no-files-found: error
 
       # 6. แจ้งเตือนเมื่อไม่ผ่าน
       - name: Fail if Quality Gate failed
