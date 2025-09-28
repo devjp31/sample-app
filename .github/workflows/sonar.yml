@@ -43,28 +43,28 @@ jobs:
           status=$(echo $response | jq -r '.projectStatus.status')
 
           echo "Quality Gate Status: $status"
-          # บันทึกสถานะเป็น Environment variable เพื่อใช้ในขั้นตอนต่อไป
-          echo "status=$status" >> $GITHUB_ENV
+          echo "status=$status" >> $GITHUB_ENV  # ✅ ใช้ env.status ต่อ
 
       # 4. สร้างรายงาน PDF เมื่อผลสแกน “ผ่าน”
       - name: Generate PDF Report
-        if: steps.qualitygate.outputs.status == 'OK'
+        if: env.status == 'OK'
         run: |
           echo "Generating Enhanced SonarCloud PDF Report..."
           pip install reportlab requests matplotlib
           python <<EOF
-          import requests
+          import os, requests
           from datetime import datetime
           from reportlab.lib.pagesizes import A4
           from reportlab.pdfgen import canvas
           from reportlab.lib import colors
-          from reportlab.lib.units import inch
 
           TOKEN = "${{ secrets.SONAR_TOKEN }}"
           PROJECT_KEY = "devjp31_sample-app"
           HOST = "https://sonarcloud.io"
 
-          # === ดึงข้อมูลจาก SonarCloud API ===
+          # Path ที่แน่นอน
+          output_path = os.path.join(os.getenv("GITHUB_WORKSPACE", "."), "Sonar_Report.pdf")
+
           metrics_url = f"{HOST}/api/measures/component?component={PROJECT_KEY}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density"
           issues_url = f"{HOST}/api/issues/search?componentKeys={PROJECT_KEY}&statuses=OPEN,CONFIRMED,REOPENED&ps=200"
 
@@ -73,12 +73,10 @@ jobs:
 
           m = {item["metric"]: item["value"] for item in metrics["component"]["measures"]}
 
-          # === สร้าง PDF ===
-          c = canvas.Canvas("Sonar_Report.pdf", pagesize=A4)
+          c = canvas.Canvas(output_path, pagesize=A4)
           width, height = A4
           y = height - 80
 
-          # หัวรายงาน
           c.setFont("Helvetica-Bold", 18)
           c.drawString(70, y, "SonarCloud Security & Code Quality Report")
           y -= 25
@@ -92,7 +90,6 @@ jobs:
           c.line(70, y, width - 70, y)
           y -= 25
 
-          # Summary
           c.setFont("Helvetica-Bold", 13)
           c.drawString(70, y, "Summary Metrics")
           y -= 20
@@ -107,7 +104,6 @@ jobs:
           y -= 20
           c.setFont("Helvetica", 10)
 
-          # === จัดกลุ่มตาม Severity ===
           issues_sorted = sorted(issues, key=lambda x: x["severity"], reverse=True)
           for issue in issues_sorted:
               msg = issue.get("message", "")
@@ -139,15 +135,18 @@ jobs:
           c.setFillColor(colors.gray)
           c.drawString(70, 60, "End of Report — Generated automatically by GitHub Actions & SonarCloud.")
           c.save()
+
+          print("✅ Report generated at:", output_path)
+          print("File exists:", os.path.exists(output_path))
           EOF
 
-      # 5. อัปโหลด PDF เป็น Artifact (ให้ทีม Security ดาวน์โหลดได้)
+      # 5. อัปโหลด PDF เป็น Artifact
       - name: Upload PDF Report
         if: env.status == 'OK'
         uses: actions/upload-artifact@v4
         with:
           name: sonarcloud-report
-          path: Sonar_Report.pdf
+          path: ${{ github.workspace }}/Sonar_Report.pdf
 
       # 6. แจ้งเตือนเมื่อไม่ผ่าน
       - name: Fail if Quality Gate failed
