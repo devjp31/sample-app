@@ -47,40 +47,94 @@ jobs:
           echo "status=$status" >> $GITHUB_ENV
 
       # 4. สร้างรายงาน PDF เมื่อผลสแกน “ผ่าน”
-      - name: Generate PDF Report
+      - name: Generate Detailed PDF Report
         if: env.status == 'OK'
         run: |
-          echo "Generating SonarCloud PDF Report..."
+          echo "Generating detailed SonarCloud PDF Report..."
           sudo apt-get update && sudo apt-get install -y python3-pip
           pip install reportlab requests
+
           python <<EOF
           import requests
           from reportlab.lib.pagesizes import A4
           from reportlab.pdfgen import canvas
+          from reportlab.lib import colors
 
-          url = "https://sonarcloud.io/api/qualitygates/project_status?projectKey=devjp31_sample-app"
-          r = requests.get(url, auth=("${{ secrets.SONAR_TOKEN }}", ""))
-          data = r.json()["projectStatus"]
+          TOKEN = "${{ secrets.SONAR_TOKEN }}"
+          PROJECT_KEY = "devjp31_sample-app"
+          HOST = "https://sonarcloud.io"
 
+          # ดึงข้อมูลสรุปคะแนน
+          metrics = "bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density"
+          summary = requests.get(
+              f"{HOST}/api/measures/component?component={PROJECT_KEY}&metricKeys={metrics}",
+              auth=(TOKEN, "")
+          ).json()["component"]["measures"]
+
+          # ดึง Issues รายละเอียด
+          issues = requests.get(
+              f"{HOST}/api/issues/search?componentKeys={PROJECT_KEY}&ps=100",
+              auth=(TOKEN, "")
+          ).json()["issues"]
+
+          # เริ่มสร้าง PDF
           c = canvas.Canvas("Sonar_Report.pdf", pagesize=A4)
           c.setFont("Helvetica-Bold", 18)
-          c.drawString(100, 800, "SonarCloud Scan Report")
+          c.drawString(100, 800, "SonarCloud Security & Code Quality Report")
+
           c.setFont("Helvetica", 12)
-          c.drawString(100, 770, "Project: devjp31_sample-app")
-          c.drawString(100, 750, f"Quality Gate: {data['status']}")
+          c.drawString(100, 780, f"Project: {PROJECT_KEY}")
+          c.drawString(100, 765, f"Host: {HOST}")
+          c.line(80, 760, 530, 760)
 
+          # Section 1: Summary Metrics
+          c.setFont("Helvetica-Bold", 14)
+          c.drawString(100, 740, "Summary Metrics")
           y = 720
-          for cond in data["conditions"]:
-              metric = cond["metricKey"]
-              status = cond["status"]
-              value = cond.get("actualValue", "N/A")
-              c.drawString(100, y, f"{metric}: {status} (value={value})")
-              y -= 20
+          for m in summary:
+              c.setFont("Helvetica", 12)
+              c.drawString(110, y, f"{m['metric'].replace('_', ' ').title()}: {m['value']}")
+              y -= 18
 
+          # Section 2: Issues Details
+          c.setFont("Helvetica-Bold", 14)
+          y -= 10
+          c.drawString(100, y, "Detected Issues")
+          y -= 20
+
+          if not issues:
+              c.setFont("Helvetica-Oblique", 12)
+              c.drawString(120, y, "No issues found. Codebase is clean.")
+          else:
+              for issue in issues:
+                  if y < 100:  # สร้างหน้าถัดไปเมื่อเต็มหน้า
+                      c.showPage()
+                      y = 800
+                      c.setFont("Helvetica-Bold", 14)
+                      c.drawString(100, y, "Detected Issues (continued)")
+                      y -= 30
+
+                  c.setFont("Helvetica", 11)
+                  c.setFillColor(colors.black)
+                  c.drawString(100, y, f"Type: {issue['type']}, Severity: {issue['severity']}")
+                  y -= 15
+                  c.setFont("Helvetica-Oblique", 10)
+                  c.drawString(120, y, f"{issue['message']}")
+                  y -= 12
+                  c.setFont("Helvetica", 9)
+                  c.setFillColor(colors.gray)
+                  c.drawString(120, y, f"File: {issue.get('component', '')}, Line: {issue.get('line', 'N/A')}, Rule: {issue.get('rule', '')}")
+                  y -= 20
+
+          # สรุปท้ายรายงาน
+          c.setFillColor(colors.black)
+          c.setFont("Helvetica-Bold", 12)
+          c.drawString(100, y-10, "End of Report")
           c.setFont("Helvetica-Oblique", 10)
-          c.drawString(100, y-20, "Generated automatically by GitHub Actions and SonarCloud.")
+          c.drawString(100, y-25, "Generated automatically by GitHub Actions and SonarCloud.")
           c.save()
           EOF
+
 
       # 5. อัปโหลด PDF เป็น Artifact (ให้ทีม Security ดาวน์โหลดได้)
       - name: Upload PDF Report
