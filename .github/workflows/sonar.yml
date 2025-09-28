@@ -49,11 +49,10 @@ jobs:
       - name: Generate PDF Report
         if: env.status == 'OK'
         run: |
-          echo "Generating Final SonarCloud PDF Report with Logo..."
-          pip install reportlab requests beautifulsoup4 pytz pillow
+          echo "Generating Final SonarCloud PDF Report..."
+          pip install reportlab requests beautifulsoup4 pytz
           python <<EOF
           import os
-          import io
           import pytz
           import requests
           from datetime import datetime
@@ -61,8 +60,9 @@ jobs:
           from reportlab.lib.pagesizes import A4
           from reportlab.pdfgen import canvas
           from reportlab.lib import colors
-          from reportlab.platypus import Table, TableStyle
-          from reportlab.lib.utils import ImageReader
+          from reportlab.platypus import Table, TableStyle, Paragraph
+          from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+          from reportlab.lib.enums import TA_LEFT
 
           TOKEN = "${{ secrets.SONAR_TOKEN }}"
           PROJECT_KEY = "devjp31_sample-app"
@@ -71,7 +71,7 @@ jobs:
 
           # === เวลาไทย (Bangkok) ===
           bangkok_tz = pytz.timezone("Asia/Bangkok")
-          local_time = datetime.now(bangkok_tz).strftime("%Y-%m-%d %H:%M %Z")
+          local_time = datetime.now(bangkok_tz).strftime("%Y-%m-%d %H:%M")
 
           # === ดึงข้อมูลจาก SonarCloud ===
           metrics_url = f"{HOST}/api/measures/component?component={PROJECT_KEY}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density"
@@ -96,16 +96,6 @@ jobs:
           c = canvas.Canvas(output_path, pagesize=A4)
           width, height = A4
           y = height - 70
-
-          # === โลโก้ SonarCloud ===
-          try:
-              png_logo_url = "https://upload.wikimedia.org/wikipedia/commons/3/33/SonarQube_Logo.png"
-              logo_img = ImageReader(io.BytesIO(requests.get(png_logo_url).content))
-              c.drawImage(logo_img, 70, y - 25, width=100, height=25, mask='auto')
-          except Exception as e:
-              print(f"Logo load failed: {e}")
-
-          y -= 40
 
           # === Header ===
           c.setFont("Helvetica-Bold", 16)
@@ -187,6 +177,18 @@ jobs:
           y -= 18
           c.setFont("Helvetica", 9)
 
+          # สร้าง style สำหรับ paragraph
+          styles = getSampleStyleSheet()
+          solution_style = ParagraphStyle(
+              'SolutionText',
+              parent=styles['Normal'],
+              fontName='Helvetica',
+              fontSize=8,
+              leading=10,
+              textColor=colors.black,
+              alignment=TA_LEFT,
+          )
+
           for issue in issues:
               msg = issue.get("message", "")
               typ = issue.get("type", "")
@@ -211,7 +213,7 @@ jobs:
               except Exception:
                   pass
 
-              # === Print issue ===
+              # === แสดงข้อมูลแต่ละ issue ===
               c.setFont("Helvetica-Bold", 9)
               c.drawString(85, y, f"Type: {typ}, Severity: {sev}, Status: {status}")
               y -= 12
@@ -224,23 +226,18 @@ jobs:
               c.drawString(100, y, f"File: {file}, Line: {line}, Rule: {rule}")
               y -= 12
 
-              # === Solution ===
-              c.setFont("Helvetica-Bold", 9)
-              c.drawString(100, y, "Solution:")
-              y -= 10
-              c.setFont("Helvetica", 9)
-
-              for line_text in rule_desc.split("\n"):
-                  c.drawString(110, y, line_text[:120])
-                  y -= 10
-                  if y < 80:
-                      c.showPage()
-                      y = height - 70
-              y -= 12
+              # === Solution (ใช้ Paragraph ให้ตัดบรรทัดอัตโนมัติ) ===
+              paragraph = Paragraph(f"<b>Solution:</b><br/>{rule_desc}", solution_style)
+              w, h = paragraph.wrap(width - 140, y)
+              if y - h < 80:
+                  c.showPage()
+                  y = height - 70
+              paragraph.drawOn(c, 100, y - h)
+              y -= (h + 15)
 
               c.setStrokeColor(colors.lightgrey)
               c.line(80, y, width - 80, y)
-              y -= 12
+              y -= 15
               if y < 80:
                   c.showPage()
                   y = height - 70
@@ -251,6 +248,7 @@ jobs:
           c.drawString(70, 60, "End of Report — Generated automatically by GitHub Actions + SonarCloud API.")
           c.save()
           EOF
+
 
       # 5. อัปโหลด PDF เป็น Artifact
       - name: Upload PDF Report
