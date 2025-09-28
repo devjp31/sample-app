@@ -49,24 +49,31 @@ jobs:
       - name: Generate PDF Report
         if: env.status == 'OK'
         run: |
-          echo "Generating Enhanced SonarCloud PDF Report with Solutions..."
-          pip install reportlab requests beautifulsoup4
+          echo "Generating Final SonarCloud PDF Report with Logo..."
+          pip install reportlab requests beautifulsoup4 pytz pillow
           python <<EOF
           import os
+          import io
+          import pytz
           import requests
-          from datetime import datetime, UTC
+          from datetime import datetime
+          from bs4 import BeautifulSoup
           from reportlab.lib.pagesizes import A4
           from reportlab.pdfgen import canvas
           from reportlab.lib import colors
-          from bs4 import BeautifulSoup
+          from reportlab.platypus import Table, TableStyle
+          from reportlab.lib.utils import ImageReader
 
           TOKEN = "${{ secrets.SONAR_TOKEN }}"
           PROJECT_KEY = "devjp31_sample-app"
           HOST = "https://sonarcloud.io"
-
           output_path = os.path.join(os.getenv("GITHUB_WORKSPACE", "."), "Sonar_Report.pdf")
 
-          # === Fetch data ===
+          # === เวลาไทย (Bangkok) ===
+          bangkok_tz = pytz.timezone("Asia/Bangkok")
+          local_time = datetime.now(bangkok_tz).strftime("%Y-%m-%d %H:%M %Z")
+
+          # === ดึงข้อมูลจาก SonarCloud ===
           metrics_url = f"{HOST}/api/measures/component?component={PROJECT_KEY}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density"
           issues_url = f"{HOST}/api/issues/search?componentKeys={PROJECT_KEY}&statuses=OPEN,CONFIRMED,REOPENED&ps=500"
 
@@ -74,7 +81,10 @@ jobs:
           issues = requests.get(issues_url, auth=(TOKEN, "")).json().get("issues", [])
           m = {item["metric"]: item["value"] for item in metrics["component"]["measures"]}
 
-          # === Severity Summary ===
+          total_issues = len(issues)
+          coverage = m.get("coverage", "N/A")
+
+          # === นับจำนวนตาม Severity ===
           sev_levels = ["BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"]
           sev_count = {s: 0 for s in sev_levels}
           for i in issues:
@@ -82,27 +92,47 @@ jobs:
               if sev in sev_count:
                   sev_count[sev] += 1
 
-          # === PDF setup ===
+          # === เริ่มสร้าง PDF ===
           c = canvas.Canvas(output_path, pagesize=A4)
           width, height = A4
           y = height - 70
 
-          # Header
+          # === โลโก้ SonarCloud ===
+          try:
+              logo_url = "https://sonarcloud.io/images/sonarcloud-logo.svg"
+              png_logo_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/99/SonarCloud_logo.svg/512px-SonarCloud_logo.svg.png"
+              logo_img = ImageReader(io.BytesIO(requests.get(png_logo_url).content))
+              c.drawImage(logo_img, 70, y - 25, width=120, height=25, mask='auto')
+          except Exception as e:
+              print(f"Logo load failed: {e}")
+
+          y -= 40
+
+          # === Header ===
           c.setFont("Helvetica-Bold", 16)
-          c.setFillColor(colors.HexColor("#0b6fa4"))
-          c.drawString(70, y, "SonarCloud Security & Code Quality Report")
-          y -= 20
-          c.setFont("Helvetica", 11)
           c.setFillColor(colors.black)
+          c.drawString(70, y, "SonarCloud Security & Code Quality Report")
+          y -= 25
+          c.setFont("Helvetica", 11)
           c.drawString(70, y, f"Project: {PROJECT_KEY}")
           y -= 14
           c.drawString(70, y, f"Host: {HOST}")
           y -= 14
-          c.drawString(70, y, f"Date: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}")
-          y -= 14
+          c.drawString(70, y, f"Date: {local_time}")
+          y -= 18
+
+          # === Summary Info ===
           c.setFont("Helvetica-Bold", 11)
+          c.drawString(70, y, f"Total Issues: {total_issues}")
+          y -= 14
+          c.drawString(70, y, f"Coverage: {coverage}%")
+          y -= 18
+
+          # === Quality Gate ===
+          c.setFont("Helvetica-Bold", 11)
+          c.drawString(70, y, "Quality Gate: ")
           c.setFillColor(colors.green)
-          c.drawString(70, y, "Quality Gate: PASSED")
+          c.drawString(150, y, "PASSED")
           c.setFillColor(colors.black)
           y -= 25
           c.line(70, y, width - 70, y)
@@ -110,10 +140,10 @@ jobs:
 
           # === Summary Metrics ===
           c.setFont("Helvetica-Bold", 12)
-          c.setFillColor(colors.HexColor("#0b6fa4"))
           c.drawString(70, y, "SUMMARY METRICS")
           y -= 18
           c.setFont("Helvetica", 10)
+
           for label, key in [
               ("Bugs", "bugs"),
               ("Code Smells", "code_smells"),
@@ -130,24 +160,33 @@ jobs:
               y -= 14
           y -= 10
 
-          # === Issue Overview ===
+          # === Severity Summary Table ===
           c.setFont("Helvetica-Bold", 12)
-          c.setFillColor(colors.HexColor("#0b6fa4"))
-          c.drawString(70, y, "ISSUE OVERVIEW")
-          y -= 18
-          c.setFont("Helvetica", 10)
+          c.drawString(70, y, "ISSUE SEVERITY SUMMARY")
+          y -= 20
+
+          data = [["Severity Level", "Number of Issues"]]
           for sev in sev_levels:
-              c.drawString(85, y, f"{sev.title():<10}: {sev_count[sev]}")
-              y -= 14
-          y -= 10
+              data.append([sev.title(), str(sev_count[sev])])
+
+          table = Table(data, colWidths=[200, 150])
+          table.setStyle(TableStyle([
+              ("BOX", (0,0), (-1,-1), 0.5, colors.black),
+              ("INNERGRID", (0,0), (-1,-1), 0.25, colors.black),
+              ("FONTNAME", (0,0), (-1,-1), "Helvetica"),
+              ("TEXTCOLOR", (0,0), (-1,-1), colors.black),
+              ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+              ("ALIGN", (0,0), (-1,-1), "CENTER"),
+          ]))
+          table.wrapOn(c, width, height)
+          table.drawOn(c, 80, y - 100)
+          y -= 130
 
           # === Detailed Issues ===
           c.setFont("Helvetica-Bold", 12)
-          c.setFillColor(colors.HexColor("#0b6fa4"))
           c.drawString(70, y, "DETAILED ISSUES")
           y -= 18
           c.setFont("Helvetica", 9)
-          c.setFillColor(colors.black)
 
           for issue in issues:
               msg = issue.get("message", "")
@@ -161,10 +200,13 @@ jobs:
               # === Fetch rule detail ===
               rule_desc = "(No solution provided)"
               try:
-                  rule_api = f"{HOST}/api/rules/show?key={rule}"
+                  rule_api = f"{HOST}/api/rules/show?key={rule}&actives=true"
                   rule_data = requests.get(rule_api, auth=(TOKEN, "")).json()
                   html_desc = rule_data.get("rule", {}).get("htmlDesc", "")
+                  description = rule_data.get("rule", {}).get("description", "")
                   text = BeautifulSoup(html_desc, "html.parser").get_text().strip()
+                  if not text and description:
+                      text = description.strip()
                   if text:
                       rule_desc = text
               except Exception:
@@ -183,12 +225,11 @@ jobs:
               c.drawString(100, y, f"File: {file}, Line: {line}, Rule: {rule}")
               y -= 12
 
+              # === Solution ===
               c.setFont("Helvetica-Bold", 9)
-              c.setFillColor(colors.HexColor("#0b6fa4"))
               c.drawString(100, y, "Solution:")
               y -= 10
               c.setFont("Helvetica", 9)
-              c.setFillColor(colors.black)
 
               for line_text in rule_desc.split("\n"):
                   c.drawString(110, y, line_text[:120])
@@ -201,18 +242,15 @@ jobs:
               c.setStrokeColor(colors.lightgrey)
               c.line(80, y, width - 80, y)
               y -= 12
-
               if y < 80:
                   c.showPage()
                   y = height - 70
 
-          # Footer
+          # === Footer ===
           c.setFont("Helvetica-Oblique", 9)
           c.setFillColor(colors.gray)
           c.drawString(70, 60, "End of Report — Generated automatically by GitHub Actions + SonarCloud API.")
           c.save()
-
-          print(f"Report generated at {output_path}")
           EOF
 
       # 5. อัปโหลด PDF เป็น Artifact
