@@ -50,73 +50,118 @@ jobs:
         if: env.status == 'OK'
         run: |
           echo "Generating Enhanced SonarCloud PDF Report..."
-          pip install reportlab requests matplotlib
+          pip install reportlab requests
           python <<EOF
-          import os, requests
+          import os
+          import requests
           from datetime import datetime
           from reportlab.lib.pagesizes import A4
           from reportlab.pdfgen import canvas
           from reportlab.lib import colors
+          from reportlab.lib.units import inch
 
           TOKEN = "${{ secrets.SONAR_TOKEN }}"
           PROJECT_KEY = "devjp31_sample-app"
           HOST = "https://sonarcloud.io"
 
-          # Path ที่แน่นอน
+          # Paths
           output_path = os.path.join(os.getenv("GITHUB_WORKSPACE", "."), "Sonar_Report.pdf")
 
+          # --- APIs ---
           metrics_url = f"{HOST}/api/measures/component?component={PROJECT_KEY}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density"
-          issues_url = f"{HOST}/api/issues/search?componentKeys={PROJECT_KEY}&statuses=OPEN,CONFIRMED,REOPENED&ps=200"
+          issues_url = f"{HOST}/api/issues/search?componentKeys={PROJECT_KEY}&statuses=OPEN,CONFIRMED,REOPENED&ps=500"
 
           metrics = requests.get(metrics_url, auth=(TOKEN, "")).json()
           issues = requests.get(issues_url, auth=(TOKEN, "")).json()["issues"]
 
           m = {item["metric"]: item["value"] for item in metrics["component"]["measures"]}
 
+          # --- Count severity distribution ---
+          sev_levels = ["BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"]
+          sev_count = {s: 0 for s in sev_levels}
+          for i in issues:
+              sev = i.get("severity", "INFO").upper()
+              if sev in sev_count:
+                  sev_count[sev] += 1
+
+          # --- PDF generation ---
           c = canvas.Canvas(output_path, pagesize=A4)
           width, height = A4
-          y = height - 80
+          y = height - 70
 
-          c.setFont("Helvetica-Bold", 18)
+          # Header
+          c.setFont("Helvetica-Bold", 16)
           c.drawString(70, y, "SonarCloud Security & Code Quality Report")
-          y -= 25
+          y -= 20
           c.setFont("Helvetica", 11)
           c.drawString(70, y, f"Project: {PROJECT_KEY}")
-          y -= 15
+          y -= 14
           c.drawString(70, y, f"Host: {HOST}")
-          y -= 15
+          y -= 14
           c.drawString(70, y, f"Date: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
+          y -= 14
+          c.setFont("Helvetica-Bold", 11)
+          c.setFillColor(colors.green)
+          c.drawString(70, y, "Quality Gate: PASSED")
+          c.setFillColor(colors.black)
           y -= 25
+
+          # Separator
+          c.setStrokeColor(colors.black)
           c.line(70, y, width - 70, y)
           y -= 25
 
-          c.setFont("Helvetica-Bold", 13)
-          c.drawString(70, y, "Summary Metrics")
-          y -= 20
-          c.setFont("Helvetica", 11)
-          for k, v in m.items():
-              c.drawString(80, y, f"{k.replace('_', ' ').title()}: {v}")
-              y -= 15
-
-          y -= 15
-          c.setFont("Helvetica-Bold", 13)
-          c.drawString(70, y, "Detected Issues")
-          y -= 20
+          # --- Summary Metrics ---
+          c.setFont("Helvetica-Bold", 12)
+          c.drawString(70, y, "SUMMARY METRICS")
+          y -= 18
           c.setFont("Helvetica", 10)
+          for label, key in [
+              ("Bugs", "bugs"),
+              ("Code Smells", "code_smells"),
+              ("Vulnerabilities", "vulnerabilities"),
+              ("Duplicated Lines", "duplicated_lines_density"),
+              ("Coverage", "coverage")
+          ]:
+              value = m.get(key, "N/A")
+              if key == "duplicated_lines_density":
+                  value = f"{value}%"
+              elif key == "coverage":
+                  value = f"{float(value):.1f}%"
+              c.drawString(85, y, f"{label}: {value}")
+              y -= 14
+          y -= 10
 
-          issues_sorted = sorted(issues, key=lambda x: x["severity"], reverse=True)
-          for issue in issues_sorted:
+          # --- Issue Overview ---
+          c.setFont("Helvetica-Bold", 12)
+          c.drawString(70, y, "ISSUE OVERVIEW")
+          y -= 18
+          c.setFont("Helvetica", 10)
+          c.drawString(85, y, "Severity Distribution:")
+          y -= 14
+          for sev in sev_levels:
+              c.drawString(100, y, f"- {sev.title()}: {sev_count[sev]}")
+              y -= 14
+          y -= 10
+
+          # --- Detailed Issues ---
+          c.setFont("Helvetica-Bold", 12)
+          c.drawString(70, y, "DETAILED ISSUES")
+          y -= 18
+          c.setFont("Helvetica", 9)
+
+          for issue in issues:
               msg = issue.get("message", "")
-              typ = issue["type"]
-              sev = issue["severity"]
+              typ = issue.get("type", "")
+              sev = issue.get("severity", "")
               status = issue.get("status", "")
               file = issue.get("component", "").split(":")[-1]
               line = issue.get("line", "N/A")
               rule = issue.get("rule", "N/A")
 
-              c.setFont("Helvetica-Bold", 10)
+              c.setFont("Helvetica-Bold", 9)
               c.setFillColor(colors.black)
-              c.drawString(80, y, f"Type: {typ}, Severity: {sev}, Status: {status}")
+              c.drawString(85, y, f"Type: {typ}, Severity: {sev}, Status: {status}")
               y -= 12
               c.setFont("Helvetica-Oblique", 9)
               c.setFillColor(colors.gray)
@@ -127,17 +172,19 @@ jobs:
               c.drawString(100, y, f"File: {file}, Line: {line}, Rule: {rule}")
               y -= 18
 
-              if y < 100:
+              if y < 80:
                   c.showPage()
-                  y = height - 80
+                  y = height - 70
 
           c.setFont("Helvetica-Oblique", 9)
           c.setFillColor(colors.gray)
-          c.drawString(70, 60, "End of Report — Generated automatically by GitHub Actions & SonarCloud.")
+          y -= 10
+          c.drawString(70, y, "────────────────────────────")
+          y -= 15
+          c.drawString(70, y, "End of Report — Generated automatically by GitHub Actions + SonarCloud API.")
           c.save()
 
-          print("✅ Report generated at:", output_path)
-          print("File exists:", os.path.exists(output_path))
+          print(f"Report generated at {output_path}")
           EOF
 
       # 5. อัปโหลด PDF เป็น Artifact
