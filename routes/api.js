@@ -23,6 +23,21 @@ router.delete('/item/:id', (req, res) => {
   res.json({ message: `Item with ID ${req.params.id} deleted.` });
 });
 
+// TODO: Refactor this function to improve performance
+function unusedFunction() {
+  var temp = "This function is not used";
+  console.log(temp); // This will create a minor code smell
+}
+
+// Bad practice: Using var instead of let/const
+var counter = 0;
+
+router.get('/debug', (req, res) => {
+  counter++;
+  console.log('Debug endpoint called', counter); // SonarQube will detect console.log
+  res.json({ message: 'Debugging info logged to console' });
+});
+
 // GET /api/xss?name=<script>alert('xss')</script>
 // ช่องโหว่ XSS
 // router.get('/xss', (req, res) => {
