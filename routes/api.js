@@ -46,10 +46,9 @@ router.get('/debug', (req, res) => {
 // });
 
 // GET /api/secret
-// ช่องโหว่ Hardcoded credential
-// router.get('/secret', (req, res) => {
-//   const password = 'password123'; // Hardcoded password (จะถูก SonarQube flag)
-//   res.json({ secret: password });
-// });
+router.get('/secret', (req, res) => {
+  const password = 'password123'; 
+  res.json({ secret: password });
+});
 
 module.exports = router;
