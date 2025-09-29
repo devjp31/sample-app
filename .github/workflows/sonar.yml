@@ -78,6 +78,9 @@ jobs:
           metrics_url = f"{HOST}/api/measures/component?component={PROJECT_KEY}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density"
           issues_url = f"{HOST}/api/issues/search?componentKeys={PROJECT_KEY}&statuses=OPEN,CONFIRMED,REOPENED&ps=500"
 
+          hotspots_url = f"{HOST}/api/hotspots/search?projectKey={PROJECT_KEY}&status=TO_REVIEW&ps=500"
+          hotspots = requests.get(hotspots_url, auth=(TOKEN, "")).json().get("hotspots", [])
+
           metrics = requests.get(metrics_url, auth=(TOKEN, "")).json()
           issues = requests.get(issues_url, auth=(TOKEN, "")).json().get("issues", [])
           m = {item["metric"]: item["value"] for item in metrics["component"]["measures"]}
@@ -122,6 +125,8 @@ jobs:
           y -= 14
           c.drawString(70, y, f"Coverage: {coverage}%")
           y -= 18
+          c.drawString(70, y, f"Security Hotspots: {len(hotspots)}")
+          y -= 18
 
           # === Quality Gate ===
           c.setFont("Helvetica-Bold", 11)
@@ -152,7 +157,8 @@ jobs:
           ]:
               value = m.get(key, "N/A")
               try:
-                  value = f"{float(value):.1f}%" if key in ("duplicated_lines_density", "coverage") else value
+                  if key in ("duplicated_lines_density", "coverage") and value != "N/A":
+                      value = f"{float(value):.1f}%"
               except (ValueError, TypeError):
                   pass
               c.drawString(85, y, f"{label}: {value}")
@@ -251,6 +257,37 @@ jobs:
               if y < 80:
                   c.showPage()
                   y = height - 70
+
+          # === Security Hotspots ===
+          if hotspots:
+              c.setFont("Helvetica-Bold", 12)
+              c.drawString(70, y, "SECURITY HOTSPOTS")
+              y -= 18
+              c.setFont("Helvetica", 9)
+
+              for h in hotspots:
+                  msg = h.get("message", "")
+                  rule = h.get("ruleKey", "")
+                  file = h.get("component", "").split(":")[-1]
+                  line = h.get("line", "N/A")
+                  status = h.get("status", "N/A")
+                  review_prio = h.get("vulnerabilityProbability", "N/A")
+
+                  c.setFont("Helvetica-Bold", 9)
+                  c.drawString(85, y, f"File: {file}, Line: {line}")
+                  y -= 12
+                  c.setFont("Helvetica", 9)
+                  c.drawString(100, y, f"Status: {status}, Priority: {review_prio}")
+                  y -= 12
+                  c.setFont("Helvetica-Oblique", 9)
+                  c.setFillColor(colors.gray)
+                  c.drawString(100, y, msg)
+                  c.setFillColor(colors.black)
+                  y -= 15
+
+                  if y < 80:
+                      c.showPage()
+                      y = height - 70
 
           # === Footer ===
           c.setFont("Helvetica-Oblique", 9)
