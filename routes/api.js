@@ -40,10 +40,10 @@ router.get('/debug', (req, res) => {
 
 // GET /api/xss?name=<script>alert('xss')</script>
 // ช่องโหว่ XSS
-// router.get('/xss', (req, res) => {
-//   const name = req.query.name;
-//   res.send(`<h1>Welcome ${name}</h1>`);
-// });
+router.get('/xss', (req, res) => {
+  const name = req.query.name;
+  res.send(`<h1>Welcome ${name}</h1>`);
+});
 
 GET /api/secret
 router.get('/secret', (req, res) => {
