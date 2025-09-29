@@ -6,53 +6,58 @@ on:
       - main
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 jobs:
   sonarcloud:
     name: SonarCloud Scan and Generate Report
     runs-on: ubuntu-latest
 
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+      SONAR_PROJECTKEY: ${{ secrets.SONAR_PROJECTKEY }}
+
     steps:
-      # 1. ดึงโค้ดจาก GitHub
+      # 1. Checkout โค้ดจาก GitHub
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # ต้องเป็น 0 เพื่อให้ SonarCloud อ่าน commit history ได้ถูกต้อง
+          fetch-depth: 0  # จำเป็นสำหรับ SonarCloud
 
       # 2. รันการสแกนด้วย SonarCloud
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.organization=nittayajp31-create
-            -Dsonar.projectKey=devjp31_sample-app
-            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ env.SONAR_PROJECTKEY }}
+            -Dsonar.host.url=${{ env.SONAR_HOST_URL }}
 
       # 3. ตรวจสอบสถานะ Quality Gate จาก SonarCloud API
       - name: Check Quality Gate status
         id: qualitygate
         run: |
           echo "Checking SonarCloud Quality Gate status..."
-          response=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "https://sonarcloud.io/api/qualitygates/project_status?projectKey=devjp31_sample-app")
+          response=$(curl -s -u "$SONAR_TOKEN:" \
+            "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$SONAR_PROJECTKEY")
 
           echo "Response: $response"
           status=$(echo $response | jq -r '.projectStatus.status')
 
           echo "Quality Gate Status: $status"
-          echo "status=$status" >> $GITHUB_ENV  # ใช้ env.status ต่อ
+          echo "status=$status" >> $GITHUB_ENV
 
-      # 4. สร้างรายงาน PDF เมื่อผลสแกน “ผ่าน”
+      # 4. สร้างรายงาน PDF (ไม่ว่าจะ pass หรือ fail)
       - name: Generate PDF Report
-        #if: env.status == 'OK'
         if: always()
         run: |
-          echo "Generating Final SonarCloud PDF Report..."
+          echo "Generating SonarCloud PDF Report..."
           pip install reportlab requests beautifulsoup4 pytz
-          python <<EOF
+          python <<'EOF'
           import os
           import pytz
           import requests
@@ -65,26 +70,26 @@ jobs:
           from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
           from reportlab.lib.enums import TA_LEFT
 
-          TOKEN = "${{ secrets.SONAR_TOKEN }}"
-          PROJECT_KEY = "devjp31_sample-app"
-          HOST = "https://sonarcloud.io"
-          output_path = os.path.join(os.getenv("GITHUB_WORKSPACE", "."), "Sonar_Report.pdf")
+          TOKEN = os.getenv("SONAR_TOKEN")
+          PROJECT_KEY = os.getenv("SONAR_PROJECTKEY")
+          HOST = os.getenv("SONAR_HOST_URL")
+          ORG = os.getenv("SONAR_ORGANIZATION")
+          output_path = "Sonar_Report.pdf"
 
-          # === เวลาไทย (Bangkok) ===
+          # === เวลาไทย ===
           bangkok_tz = pytz.timezone("Asia/Bangkok")
           local_time = datetime.now(bangkok_tz).strftime("%Y-%m-%d %H:%M")
 
           # === ดึงข้อมูลจาก SonarCloud ===
           metrics_url = f"{HOST}/api/measures/component?component={PROJECT_KEY}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density"
           issues_url = f"{HOST}/api/issues/search?componentKeys={PROJECT_KEY}&statuses=OPEN,CONFIRMED,REOPENED&ps=500"
-
           hotspots_url = f"{HOST}/api/hotspots/search?projectKey={PROJECT_KEY}&status=TO_REVIEW&ps=500"
-          hotspots = requests.get(hotspots_url, auth=(TOKEN, "")).json().get("hotspots", [])
 
           metrics = requests.get(metrics_url, auth=(TOKEN, "")).json()
           issues = requests.get(issues_url, auth=(TOKEN, "")).json().get("issues", [])
-          m = {item["metric"]: item["value"] for item in metrics["component"]["measures"]}
+          hotspots = requests.get(hotspots_url, auth=(TOKEN, "")).json().get("hotspots", [])
 
+          m = {item["metric"]: item["value"] for item in metrics.get("component", {}).get("measures", [])}
           total_issues = len(issues)
           coverage = m.get("coverage", "N/A")
 
@@ -147,7 +152,6 @@ jobs:
           c.drawString(70, y, "SUMMARY METRICS")
           y -= 18
           c.setFont("Helvetica", 10)
-
           for label, key in [
               ("Bugs", "bugs"),
               ("Code Smells", "code_smells"),
@@ -193,7 +197,6 @@ jobs:
           y -= 18
           c.setFont("Helvetica", 9)
 
-          # สร้าง style สำหรับ paragraph
           styles = getSampleStyleSheet()
           solution_style = ParagraphStyle(
               'SolutionText',
@@ -214,10 +217,10 @@ jobs:
               line = issue.get("line", "N/A")
               rule = issue.get("rule", "N/A")
 
-              # === Fetch rule detail ===
+              # ดึง Solution
               rule_desc = "(No solution provided)"
               try:
-                  rule_api = f"{HOST}/api/rules/show?key={rule}&organization=nittayajp31-create&actives=true"
+                  rule_api = f"{HOST}/api/rules/show?key={rule}&organization={ORG}&actives=true"
                   rule_data = requests.get(rule_api, auth=(TOKEN, "")).json()
                   html_desc = rule_data.get("rule", {}).get("htmlDesc", "")
                   description = rule_data.get("rule", {}).get("description", "")
@@ -229,7 +232,7 @@ jobs:
               except Exception:
                   pass
 
-              # === แสดงข้อมูลแต่ละ issue ===
+              # แสดงรายละเอียด
               c.setFont("Helvetica-Bold", 9)
               c.drawString(85, y, f"Type: {typ}, Severity: {sev}, Status: {status}")
               y -= 12
@@ -242,7 +245,6 @@ jobs:
               c.drawString(100, y, f"File: {file}, Line: {line}, Rule: {rule}")
               y -= 12
 
-              # === Solution (ใช้ Paragraph ให้ตัดบรรทัดอัตโนมัติ) ===
               paragraph = Paragraph(f"<b>Solution:</b><br/>{rule_desc}", solution_style)
               w, h = paragraph.wrap(width - 140, y)
               if y - h < 80:
@@ -264,15 +266,12 @@ jobs:
               c.drawString(70, y, "SECURITY HOTSPOTS")
               y -= 18
               c.setFont("Helvetica", 9)
-
               for h in hotspots:
                   msg = h.get("message", "")
-                  rule = h.get("ruleKey", "")
                   file = h.get("component", "").split(":")[-1]
                   line = h.get("line", "N/A")
                   status = h.get("status", "N/A")
                   review_prio = h.get("vulnerabilityProbability", "N/A")
-
                   c.setFont("Helvetica-Bold", 9)
                   c.drawString(85, y, f"File: {file}, Line: {line}")
                   y -= 12
@@ -284,7 +283,6 @@ jobs:
                   c.drawString(100, y, msg)
                   c.setFillColor(colors.black)
                   y -= 15
-
                   if y < 80:
                       c.showPage()
                       y = height - 70
@@ -296,16 +294,15 @@ jobs:
           c.save()
           EOF
 
-
-      # 5. อัปโหลด PDF เป็น Artifact
+      # 5. อัปโหลด PDF
       - name: Upload PDF Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sonarcloud-report
-          path: ${{ github.workspace }}/Sonar_Report.pdf
+          path: Sonar_Report.pdf
 
-      # 6. แจ้งเตือนเมื่อไม่ผ่าน
+      # 6. Fail หาก Quality Gate ไม่ผ่าน
       - name: Fail if Quality Gate failed
         if: env.status != 'OK'
         run: |
