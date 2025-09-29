@@ -45,7 +45,7 @@ router.get('/debug', (req, res) => {
 //   res.send(`<h1>Welcome ${name}</h1>`);
 // });
 
-// GET /api/secret
+GET /api/secret
 router.get('/secret', (req, res) => {
   const password = 'password123'; 
   res.json({ secret: password });
