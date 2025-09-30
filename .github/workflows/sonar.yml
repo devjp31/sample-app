@@ -74,11 +74,13 @@ jobs:
           PROJECT_KEY = os.getenv("SONAR_PROJECTKEY")
           HOST = os.getenv("SONAR_HOST_URL")
           ORG = os.getenv("SONAR_ORGANIZATION")
-          output_path = "Sonar_Report.pdf"
 
           # === เวลาไทย ===
           bangkok_tz = pytz.timezone("Asia/Bangkok")
           local_time = datetime.now(bangkok_tz).strftime("%Y-%m-%d %H:%M")
+          local_time2 = datetime.now(bangkok_tz).strftime("%Y%m%d%H%M")
+
+          output_path = "Sonar_Report_{local_time2}.pdf"
 
           # === ดึงข้อมูลจาก SonarCloud ===
           metrics_url = f"{HOST}/api/measures/component?component={PROJECT_KEY}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density"
